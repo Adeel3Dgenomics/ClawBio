@@ -1573,6 +1573,21 @@ def _canonical_extra_flag(flag: str) -> str:
     return flag
 
 
+class _SkillFailed(Exception):
+    """Marks the audit span ERROR: run_skill reports failure as a dict, not a raise."""
+
+
+def _skill_version(skill_name: str) -> str:
+    """The SKILL.md frontmatter version, so an audit record says which methodology ran."""
+    script = SKILLS.get(skill_name, {}).get("script")
+    try:
+        frontmatter = (script.parent / "SKILL.md").read_text(encoding="utf-8").split("---")[1]
+    except (AttributeError, OSError, IndexError):
+        return "unknown"
+    match = re.search(r"^\s*version:\s*['\"]?([^'\"\s]+)", frontmatter, re.M)
+    return match.group(1) if match else "unknown"
+
+
 def run_skill(
     skill_name: str,
     input_path: str | None = None,
@@ -1587,7 +1602,40 @@ def run_skill(
 
     Returns a structured dict with success status, output paths, and logs.
     Importable by any agent (RoboTerri, RoboIsaac, Claude Code).
+
+    Every run is recorded as a skill_run span in the audit log, so a new skill
+    is covered as soon as it is registered.
     """
+    # Deferred: `import clawbio` reaches this module, and a stdlib-only skill's
+    # reproducibility recipe must not need opentelemetry (test_import_weight).
+    from clawbio.common.audit import skill_run
+
+    try:
+        with skill_run(
+            skill_name,
+            _skill_version(skill_name),
+            input_file=input_path or "",
+            output_dir=output_dir or "",
+        ):
+            result = _run_skill(
+                skill_name, input_path, output_dir, demo, extra_args, timeout, profile_path
+            )
+            if not result["success"]:
+                raise _SkillFailed(f"exit code {result['exit_code']}")
+    except _SkillFailed:
+        pass
+    return result
+
+
+def _run_skill(
+    skill_name: str,
+    input_path: str | None,
+    output_dir: str | None,
+    demo: bool,
+    extra_args: list[str] | None,
+    timeout: int,
+    profile_path: str | None,
+) -> dict:
     # Handle full-profile virtual skill
     if skill_name == "full-profile":
         return _run_full_profile(
