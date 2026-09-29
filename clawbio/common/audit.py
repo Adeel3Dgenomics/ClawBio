@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -156,15 +157,24 @@ def skill_run(
         # Opt-in, and deliberately not OTEL_EXPORTER_OTLP_ENDPOINT: an org-wide
         # setting would otherwise point spans carrying output paths at whatever
         # collector the org runs, which may not be on this machine.
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
-        provider.add_span_processor(
-            BatchSpanProcessor(
-                # Short timeout: a dead collector must not make shutdown() look
-                # like a hung analysis.
-                OTLPSpanExporter(endpoint=_traces_url(endpoint), timeout=5)
+        try:
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        except ImportError:
+            # Tracing is optional; the analysis it describes is not.
+            print(
+                "clawbio: CLAWBIO_OTLP_ENDPOINT is set but the exporter is not "
+                "installed (pip install 'clawbio[otlp]'); spans stay in the "
+                "local audit log only.",
+                file=sys.stderr,
             )
-        )
+        else:
+            provider.add_span_processor(
+                BatchSpanProcessor(
+                    # Short timeout: a dead collector must not make shutdown() look
+                    # like a hung analysis.
+                    OTLPSpanExporter(endpoint=_traces_url(endpoint), timeout=5)
+                )
+            )
     tracer = provider.get_tracer("clawbio")
 
     token = _TRACER.set(tracer)
