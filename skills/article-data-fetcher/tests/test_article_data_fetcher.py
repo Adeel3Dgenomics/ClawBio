@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import sys
 
+pytest.importorskip("tqdm", reason="article-data-fetcher needs tqdm, which no extra declares yet")
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from article_data_fetcher import (
     ACCESSION_PATTERNS,
