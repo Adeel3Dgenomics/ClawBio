@@ -104,6 +104,10 @@ spatial = [
     "scanpy>=1.10",
     "leidenalg>=0.10",
 ]
+# cv2 for skills/data-extractor's axis calibration (data_extractor_core/cv_calibration.py).
+data-extractor = [
+    "opencv-python-headless>=5.0.0.93",
+]
 
 [tool.uv]
 # glimix-core (a hard dependency of sushie) requires liknorm, and liknorm 2.0.0
