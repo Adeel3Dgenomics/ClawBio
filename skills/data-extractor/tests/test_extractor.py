@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 
 import pytest
-
-needs_cv2 = pytest.mark.skipif(importlib.util.find_spec("cv2") is None, reason="needs cv2 (install cv2)")
 
 # Add skill root to sys.path
 _SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -68,7 +65,6 @@ def test_extracted_data_model():
     assert len(data.series[0].y_values) == 3
 
 
-@needs_cv2
 def test_cv_calibration_import():
     """Test that cv_calibration module can be imported."""
     from data_extractor_core.cv_calibration import (
