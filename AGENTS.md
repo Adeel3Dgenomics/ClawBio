@@ -227,7 +227,7 @@ Hypothesis's default 200 ms deadline otherwise makes them flaky in CI.
 
 ## How to Add a New Skill
 
-**Every new skill MUST conform to `templates/SKILL-TEMPLATE.md`.** No exceptions. The `/pr-audit` command enforces this on every PR.
+**Every new skill MUST conform to `templates/SKILL-TEMPLATE.md`.** No exceptions.
 
 1. **Create the directories**: `mkdir -p skills/<your-skill-name>/tests skills/<your-skill-name>/examples`
 2. **Copy the template**: `cp templates/SKILL-TEMPLATE.md skills/<your-skill-name>/SKILL.md`
