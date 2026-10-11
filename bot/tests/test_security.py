@@ -188,9 +188,6 @@ def test_adapters_do_not_define_their_own_copies():
 
 # --- Uploads are stored per sender, so two senders cannot collide ---
 
-from hypothesis import given  # noqa: E402
-from hypothesis import strategies as st  # noqa: E402
-
 from security import upload_tmp_path  # noqa: E402
 
 
@@ -198,7 +195,19 @@ def test_same_filename_from_two_senders_does_not_collide():
     assert upload_tmp_path("+447700900001", "genome.txt") != upload_tmp_path("+447700900002", "genome.txt")
 
 
-@given(owner=st.text(), filename=st.text())
+@pytest.mark.parametrize(
+    "owner, filename",
+    [
+        ("", ""),
+        ("..", ".."),
+        ("../../etc", "../../passwd"),
+        ("a/b", "/abs/path.vcf"),
+        ("a\\b", "C:\\win\\x.vcf"),
+        ("x\x00y", "a\x00b.vcf"),
+        ("ü😀", "génome😀.vcf"),
+        ("1" * 500, "f" * 500 + ".vcf"),
+    ],
+)
 def test_upload_tmp_path_stays_in_tempdir(owner, filename):
     import tempfile
 
