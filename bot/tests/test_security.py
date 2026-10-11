@@ -192,7 +192,7 @@ from security import upload_tmp_path  # noqa: E402
 
 
 def test_same_filename_from_two_senders_does_not_collide():
-    assert upload_tmp_path("+447700900001", "genome.txt") != upload_tmp_path("+447700900002", "genome.txt")
+    assert upload_tmp_path("sender-a", "genome.txt") != upload_tmp_path("sender-b", "genome.txt")
 
 
 @pytest.mark.parametrize(
