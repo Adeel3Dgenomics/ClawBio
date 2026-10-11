@@ -43,7 +43,6 @@ if str(_PROJECT_ROOT_FOR_IMPORT) not in sys.path:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from security import (
     UnsafePath,
-    is_allowed_extension,
     safe_write_path,
     sanitize_filename,
     scoped_get,
