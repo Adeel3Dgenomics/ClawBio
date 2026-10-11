@@ -146,6 +146,19 @@ Bundled biology demos in `examples/`:
 - `il6r_crp.yaml` - IL6R × CRP at chr1:154425508; canonical IVW MR demo.
 - `tcf7l2_hba1c.json` - TCF7L2 × HbA1c; type-2 diabetes locus.
 
+## Output Structure
+
+```
+<output_dir>/
+├── report.md
+├── variants.tsv
+├── manifest.yaml            # manifest.json if PyYAML is missing
+└── reproducibility/
+    ├── commands.sh
+    ├── environment.yml
+    └── checksums.sha256     # verify: cd <output_dir> && sha256sum -c reproducibility/checksums.sha256
+```
+
 ## Example Output
 
 Running `--demo` (SORT1 × cholesterol-VLDL):
