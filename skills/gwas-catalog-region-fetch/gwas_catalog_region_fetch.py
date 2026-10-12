@@ -32,6 +32,7 @@ import gzip
 import io
 import json
 import re
+import shlex
 import sys
 import time
 from dataclasses import dataclass, field, asdict
@@ -39,6 +40,16 @@ from pathlib import Path
 from typing import Any
 
 import requests
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from clawbio.common.reproducibility import (  # noqa: E402
+    write_checksums,
+    write_commands_sh,
+    write_environment_yml,
+)
 
 DEFAULT_FTP_BASE = "https://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics"
 DEFAULT_TIMEOUT_S = 120.0
@@ -457,6 +468,25 @@ def main(argv: list[str] | None = None) -> int:
         f"- **Output TSV:** {tsv_path.name}",
     ]
     (args.output / "report.md").write_text("\n".join(report) + "\n")
+
+    cmd = ["python", "skills/gwas-catalog-region-fetch/gwas_catalog_region_fetch.py"]
+    if args.demo is not None:
+        cmd += ["--demo"] if args.demo == "__default__" else ["--demo", args.demo]
+    else:
+        cmd += ["--input", str(args.input)]
+    cmd += ["--output", str(args.output)]
+    if args.no_cache:
+        cmd.append("--no-cache")
+    write_commands_sh(args.output, shlex.join(cmd))
+    env_path = write_environment_yml(
+        args.output, "clawbio-gwas-catalog-region-fetch",
+        pip_deps=["pysam>=0.22", "requests>=2.28", "pyyaml"],
+    )
+    write_checksums(
+        [args.output / name for name in ("report.md", "variants.tsv", "manifest.yaml", "manifest.json")]
+        + [env_path],
+        args.output, anchor=args.output,
+    )
 
     print(f"gwas-catalog-region-fetch: {result.n_variants} variants -> {tsv_path}")
     print(f"  source: GWAS Catalog harmonised | accession {result.release.accession}")
