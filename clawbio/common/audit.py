@@ -177,7 +177,7 @@ def skill_run(
             span.set_attribute("gen_ai.agent.id", skill)
             span.set_attribute("gen_ai.agent.version", version)
             # Phoenix classifies on this key alone; without it: "unknown".
-            span.set_attribute("openinference.span.kind", "AGENT")
+            span.set_attribute("openinference.span.kind", "CHAIN")
             # Each omitted when empty. The checksum keeps a clawbio.* namespace
             # because no convention has an equivalent; the file and the output
             # dir are the viewers' Input and Output, one key each, so the

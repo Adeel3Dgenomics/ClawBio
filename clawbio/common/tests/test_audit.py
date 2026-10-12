@@ -214,7 +214,9 @@ def test_span_kinds_are_set_for_trace_viewers(tmp_path):
     records = [json.loads(line) for line in log.read_text().splitlines()]
     tool = next(r for r in records if r["event"] == "execute_tool bcftools_view")
     root = next(r for r in records if r["event"] == "skill_run")
-    assert root["openinference.span.kind"] == "AGENT"
+    # A skill run is a fixed pipeline, OpenInference's CHAIN; AGENT means a
+    # reasoning loop that chooses its own steps.
+    assert root["openinference.span.kind"] == "CHAIN"
     assert tool["openinference.span.kind"] == "TOOL"
     assert tool["tool.name"] == "bcftools_view"
 
