@@ -260,7 +260,6 @@
         "python>=3.11",
         "requests>=2.31",
         "biopython>=1.83",
-        "tqdm>=4.66",
         "pydantic>=2.0"
       ],
       "tags": [
