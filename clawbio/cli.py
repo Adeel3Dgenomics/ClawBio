@@ -1608,22 +1608,23 @@ def run_skill(
     """
     # Deferred: `import clawbio` reaches this module, and a stdlib-only skill's
     # reproducibility recipe must not need opentelemetry (test_import_weight).
+    from contextlib import suppress
+
     from clawbio.common.audit import skill_run
 
-    try:
-        with skill_run(
-            skill_name,
-            _skill_version(skill_name),
-            input_file=input_path or "",
-            output_dir=output_dir or "",
-        ):
-            result = _run_skill(
-                skill_name, input_path, output_dir, demo, extra_args, timeout, profile_path
-            )
-            if not result["success"]:
-                raise _SkillFailed(f"exit code {result['exit_code']}")
-    except _SkillFailed:
-        pass
+    # skill_run sees _SkillFailed first and marks the span ERROR; suppress then
+    # drops it, so the caller still gets the result dict.
+    with suppress(_SkillFailed), skill_run(
+        skill_name,
+        _skill_version(skill_name),
+        input_file=input_path or "",
+        output_dir=output_dir or "",
+    ):
+        result = _run_skill(
+            skill_name, input_path, output_dir, demo, extra_args, timeout, profile_path
+        )
+        if not result["success"]:
+            raise _SkillFailed(f"exit code {result['exit_code']}")
     return result
 
 
