@@ -172,3 +172,25 @@ def test_parse_vcf_keeps_format_fields(tmp_path):
                    "19\t39056319\t.\tG\tGTTTT\t69.6\tPASS\t.\tGT:AD:DP:GQ\t0/1:30,4:34:77\n")
     rec = parse_vcf(vcf)[0]
     assert rec.sample["AD"] == "30,4" and rec.alt_index == 1
+
+
+def test_no_call_genotype_abstains():
+    # review 12.10.2026: a no-call used to raise ValueError and skip the check entirely
+    for gt in ("./.", ".", "0/.", ".|."):
+        rec = _rec(gt=gt, ad="30,4")
+        res = audit_classified(_cv(gene="RYR1", hgvsp=""), {}, record=rec)
+        assert not res.passed, gt
+        assert "NO_GENOTYPE_CALL" in res.reason_codes(), gt
+
+
+def test_no_call_is_judged_even_without_ad():
+    rec = _rec(); rec.sample = {"GT": "./."}
+    res = audit_classified(_cv(gene="RYR1", hgvsp=""), {}, record=rec)
+    assert "NO_GENOTYPE_CALL" in res.reason_codes()
+
+
+def test_sites_only_record_is_not_judged():
+    rec = _rec(); rec.sample = {}; rec.genotype = ""
+    res = audit_classified(_cv(gene="RYR1", hgvsp=""), {}, record=rec)
+    assert "NO_GENOTYPE_CALL" not in res.reason_codes()
+    assert "ALLELE_IMBALANCE" not in res.reason_codes()

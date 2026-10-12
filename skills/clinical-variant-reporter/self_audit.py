@@ -26,6 +26,12 @@ The invariants encode failure classes observed in practice:
                         window are a classic misalignment artefact; classifying them
                         as loss-of-function (PVS1) produces confident false positives.
                         Only applied when the VCF carries AD.
+  NO_GENOTYPE_CALL    — the sample's GT is a no-call (`./.`, `.`, `0/.`) or cannot be
+                        parsed. A variant the sample was not genotyped for cannot be
+                        reported as carried, whatever its classification. Judged
+                        whenever a GT field is present, with or without AD.
+
+Only the FIRST sample of a multi-sample VCF is audited (the reporter reads that sample).
 
 These are deterministic and reproducible; they cannot hallucinate. Every new failure
 class the adversarial review surfaces should be promoted to an invariant here.
@@ -40,7 +46,12 @@ ABSTAIN_LABEL = "Abstained (self-audit)"
 _MUTUALLY_EXCLUSIVE = [("PP3", "BP4")]
 # phrases an evaluator uses when it has no underlying data
 _NO_DATA_MARKERS = ("no in silico data", "no data available", "not available", "")
-# read-support floors for a called genotype (germline, diploid)
+# read-support floors for a called genotype (germline, diploid). These are conservative
+# choices, not values from a published standard: a true germline heterozygote sits near
+# 50 % alternate reads and a true homozygote near 100 %, so 20 % / 80 % leave wide margins
+# for capture and mapping bias while still rejecting the low-fraction artefacts (mis-
+# aligned indel clusters, paralogous reads) that motivated the check; 4 alternate reads is
+# the smallest count we accept as more than a handful of errors at exome depth.
 HET_MIN_ALT_FRACTION = 0.20
 HOM_MIN_ALT_FRACTION = 0.80
 MIN_ALT_READS = 4
@@ -50,12 +61,20 @@ def _allele_balance(record) -> AuditViolation | None:
     """Check that the called genotype is supported by its own AD counts."""
     sample = getattr(record, "sample", None) or {}
     gt = (sample.get("GT") or getattr(record, "genotype", "") or "").replace("|", "/")
+    if not gt:
+        return None                      # sites-only VCF: no genotype to judge
+    try:
+        alleles = [int(a) for a in gt.split("/")]
+    except ValueError:
+        # "./.", ".", "0/." or anything unparseable: the sample was not genotyped here
+        return AuditViolation("NO_GENOTYPE_CALL",
+                              f"genotype {gt!r} is a no-call or cannot be parsed; the variant "
+                              f"cannot be reported as carried")
     ad = sample.get("AD", "")
-    if not gt or not ad or "." in ad:
-        return None
+    if not ad or "." in ad:
+        return None                      # without AD, read support is not judged (see SKILL.md)
     try:
         counts = [int(x) for x in ad.split(",")]
-        alleles = [int(a) for a in gt.split("/")]
     except ValueError:
         return None
     idx = getattr(record, "alt_index", 1)
