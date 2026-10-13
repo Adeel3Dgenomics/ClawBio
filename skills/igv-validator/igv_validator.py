@@ -501,14 +501,26 @@ def _clip_supports(r, v: Variant, fa) -> bool:
     return m_alt <= max(1, int(0.15 * k)) and m_alt < m_ref
 
 
+def _same_shifted_event(fa, chrom: str, pos: int, rp: int, ins: str | None, got: str | None, dlen: int = 0) -> bool:
+    """Is an indel the read places at rp (0-based) the same event as the call's at pos? With the reference: yes only
+    if both give the same sequence (true within a tandem repeat, false elsewhere). Without it: an insertion whose
+    bases are a rotation of the call's, or a deletion of the same length, is taken as the same event (see Gotchas)."""
+    lo, hi = min(pos, rp), max(pos, rp)
+    if fa is None:
+        return dlen > 0 or (ins is not None and len(got) == len(ins) and got in ins + ins)
+    if ins is not None:                                  # insertion: the bases between the two places
+        mid = fa.fetch(chrom, lo, hi).upper()
+        return ins + mid == mid + got if pos < rp else mid + ins == got + mid
+    # deletion of dlen bases: removing [pos, pos+dlen) or [rp, rp+dlen) leaves the same sequence
+    return fa.fetch(chrom, lo + dlen, hi + dlen).upper() == fa.fetch(chrom, lo, hi).upper()
+
+
 def _count_indel(bam, v: Variant, fa) -> dict:
     size = len(v.alt) - len(v.ref)  # negative = deletion
     pos = v.pos                      # 0-based coordinate of the first inserted/deleted base
     # the inserted bases of the call (VCF pads with the anchor base); an insertion of the same length but another
-    # sequence is not support. Shifted within a tandem repeat, the same event reads as a rotation of these bases.
+    # sequence is not support. Placed elsewhere in the window, it counts only as the same event (_same_shifted_event).
     ins_seq = (v.alt[len(v.ref):] if v.alt.startswith(v.ref) else v.alt[1:]).upper() if size > 0 else ""
-    # the deleted bases, checked against the reference where the read places its deletion (needs --reference)
-    del_seq = (v.ref[len(v.alt):] if v.ref.startswith(v.alt) else v.ref[1:]).upper() if size < 0 else ""
     depth, hits = set(), {}
     # count molecules, not reads: overlapping mates would otherwise count one DNA fragment twice
     for r in bam.fetch(v.chrom, max(0, pos - 1), pos + abs(size) + 1):
@@ -522,13 +534,12 @@ def _count_indel(bam, v: Variant, fa) -> dict:
             elif op == 1:
                 if size > 0 and n == size and abs(rp - pos) <= INDEL_WINDOW:
                     got = (r.query_sequence or "")[qp:qp + n].upper()
-                    if got == ins_seq or (rp != pos and got in ins_seq + ins_seq):
+                    if got == ins_seq if rp == pos else _same_shifted_event(fa, v.chrom, pos, rp, ins_seq, got):
                         hit = qp; break
                 qp += n
             elif op == 2:
                 if size < 0 and n == -size and abs(rp - pos) <= INDEL_WINDOW:
-                    gone = fa.fetch(v.chrom, rp, rp + n).upper() if fa is not None and rp != pos else del_seq
-                    if gone == del_seq or gone in del_seq + del_seq:   # a rotation = the same event in a repeat
+                    if rp == pos or _same_shifted_event(fa, v.chrom, pos, rp, None, None, n):
                         hit = qp; break
                 rp += n
             elif op == 4:
@@ -1968,7 +1979,9 @@ def _summary_rows(root: Path, empty_runs: list | None = None) -> list[dict]:
 
 
 AGREE = {"supported": "yes", "flagged": "no", "insufficient": "unclear", "no_coverage": "unclear"}
-WHY = {"recurrent": "same variant in several samples: likely germline or artifact",
+RECURRENT_NOTE = ("shared variants are often inherited or artifacts, but a recurrent somatic hotspot (e.g. KRAS G12D) "
+                  "looks the same, so check it")
+WHY = {"recurrent": "same variant in several samples: " + RECURRENT_NOTE,
        "ambiguous_mapping": "reads are present but map equally well to alternate contigs (MAPQ 0); a MAPQ-filtering "
                             "caller sees a false change",
        "cnv_disagrees": "read depth does not match the called copy number",
@@ -2007,7 +2020,8 @@ RECURRENT_MIN_READS = 2  # supporting reads (MAPQ >= 20) for a sample to count a
 
 
 def mark_recurrent(rows: list[dict], min_samples: int = RECURRENT_MIN) -> None:
-    """Flag SNVs/indels found at the same position in several samples: independent tumors do not share mutations,
+    """Flag SNVs/indels found at the same position in several samples: often inherited or an artifact (mapping, PDX
+    mouse reads), though a recurrent somatic hotspot looks the same, so the flag asks for a look and decides nothing.
     so the reads carrying them point to a germline variant or an artifact (mapping, PDX mouse reads)."""
     n_samples = len({r["sample"] for r in rows})
     seen, strong = {}, {}
@@ -2093,8 +2107,7 @@ def _agreement(r: dict) -> dict | None:
     why = "; ".join(WHY[f] for f in flags if f in WHY) or ("the reads support the call" if agrees == "yes" else "")
     if "recurrent" in flags:
         agrees = "in reads, recurrent"
-        why = (f"the reads carry it, but the same variant is in {r['_recurrent']}; independent tumors do not share "
-               f"mutations, so it is likely germline or artifact, not a tumor mutation")
+        why = f"the reads carry it, and the same variant is in {r['_recurrent']}: {RECURRENT_NOTE}"
         if r.get("_recurrent_low_vaf"):
             why += ("; its allele fractions are too low for an inherited variant (~50% or ~100%), so an artifact "
                     "(e.g. mismapped or mouse reads) is more likely")
@@ -2168,8 +2181,10 @@ def _cn_evidence(r: dict, flags: list[str], why: str) -> tuple[str, str, str]:
     if deep:   # no gain/loss segment, but the reads are gone (a gap between segments, or a missed focal loss)
         return "DEL", "depth only", "no GATK deletion call, but the read depth shows a deep loss"
     if mild:
-        return kind, "hidden", (f"the depth shows a mild {r['_depth']} with no GATK call (on chrX, expected "
-                                f"for a single X copy if the patient is male); the curated calls leave these out by design")
+        x = (" (on chrX, expected for a single X copy if the patient is male)"
+             if str(r.get("_chrom", "")).removeprefix("chr").upper() == "X" else "")
+        return kind, "hidden", (f"the depth shows a mild {r['_depth']} with no GATK call{x}; "
+                                f"the curated calls leave these out by design")
     return "", "nothing", ""
 
 
@@ -2254,8 +2269,8 @@ def _plain_row(r: dict, ev: tuple[str, str, str]) -> str:
         return {"real": "reads support the rearrangement (split and discordant reads at the breakpoint)",
                 "weak": "only a few reads support the rearrangement"}.get(verdict, "the reads do not support the rearrangement")
     if verdict == "recurrent":
-        return (f"the variant is in the reads but also in {r.get('_recurrent', 'several samples')}: likely inherited "
-                f"or an artifact, not a tumor mutation")
+        return (f"the variant is in the reads and also in {r.get('_recurrent', 'several samples')}: often inherited "
+                f"or an artifact, but it could be a recurrent hotspot")
     if verdict == "not supported" and why:
         return f"{r['igv_shows']}, but {why}"
     return {"real": f"the variant is in the reads: {r['igv_shows']}",
@@ -2270,7 +2285,7 @@ MANY_CALLS = 3   # above this many extra calls in a gene, the plain cell gives a
 
 
 LOOK = {"No": "Look first", "Yes": "Consistent so far", "Not checked": "Not checked"}
-RAW_LOOK = {"no": "Look first", "unclear": "Unclear", "in reads, recurrent": "Likely inherited or artifact",
+RAW_LOOK = {"no": "Look first", "unclear": "Unclear", "in reads, recurrent": "Recurrent: check",
             "yes": "Consistent so far"}
 LOOK_NOTE = ("Nothing on this page is a verdict. <b>Look first</b>: the reads and the call differ. <b>Consistent so "
              "far</b>: the reads fit the call, which still needs your own look at the image or interactive view "
@@ -2324,8 +2339,9 @@ def curated_vs_igv(rows: list[dict], curated: Path) -> list[dict]:
         ev_all = [_evidence(r) for r in mine]
         wanted = set() if label.upper() == "WT" else set(label.upper().split("+"))
         unf = [t for k, v, t in ev_all if v == "unfiltered" and k not in wanted]
-        ev = [(k, "real", t) if v == "unfiltered" else (k, v, t) for k, v, t in ev_all
-              if v != "nothing" and not (v == "unfiltered" and k not in wanted)]
+        ev = [(k, "real", t) if v == "unfiltered" or (v == "recurrent" and k in wanted) else (k, v, t)
+              for k, v, t in ev_all if v != "nothing" and not (v == "unfiltered" and k not in wanted)]
+        rec_wanted = [t for k, v, t in ev_all if v == "recurrent" and k in wanted]
         have = {k for k, v, _ in ev if v in ("real", "depth only")}
         missing = sorted(wanted - have - {"LOH"})
         extra = sorted(have - wanted)
@@ -2343,9 +2359,11 @@ def curated_vs_igv(rows: list[dict], curated: Path) -> list[dict]:
             why.append(f"also a {NAMES[k]} ({words(k, ('real', 'depth only'))}); not shown because a curated call "
                        f"gives SNV/SV priority over copy number")
         rec = [t for k, v, t in ev if v == "recurrent"]
+        if rec_wanted:   # the curated call rests on a variant other samples share: keep it, and say so
+            why.append("; ".join(rec_wanted) + ": " + RECURRENT_NOTE)
         if rec:
-            why.append("; ".join(rec) + ": independent tumors do not share mutations, so it is likely germline or "
-                       "artifact" + (", consistent with leaving it out" if "SNV" not in wanted else ""))
+            why.append("; ".join(rec) + ": " + RECURRENT_NOTE
+                       + ("; consistent with leaving it out if it is inherited" if "SNV" not in wanted else ""))
         why += [t for k, v, t in ev if v == "hidden"]
         if unf:
             why.append(f"{len(unf)} SNV(s)/indel(s) from unfiltered caller output are in the reads but not in the curated "
@@ -2372,7 +2390,8 @@ def curated_vs_igv(rows: list[dict], curated: Path) -> list[dict]:
             if rec:
                 n = re.search(r"in (\d+ of \d+ samples)", rec[0])
                 reasons.append(f"the SNV{'s' if len(rec) > 1 else ''} {'are' if len(rec) > 1 else 'is'} "
-                               f"recurrent in {n.group(1) if n else 'several samples'} (likely germline or artifact)")
+                               f"recurrent in {n.group(1) if n else 'several samples'} (inherited, artifact or "
+                               f"hotspot)")
             if any(v == "hidden" for _, v, _ in ev):
                 reasons.append("a broad or mild copy-number change, left out by design")
             for k, v, t in ev:
@@ -2573,8 +2592,13 @@ def make_interactive(plan: list[dict], rows: list[dict], out: Path, annotation=N
                 cmd += ["--subsample", str(frac)]
             res = subprocess.run(cmd, capture_output=True, text=True)
             if res.returncode == 0 and dst.exists():
-                dst.write_text(offline_igv_page(dst.read_text()))
-                done[(smp, gene.upper())] = dst
+                try:
+                    dst.write_text(safe_igv_page(dst.read_text()))
+                    done[(smp, gene.upper())] = dst
+                except ValueError as err:          # never leave a page that would reach the network
+                    dst.unlink(missing_ok=True)
+                    notes.append(f"{smp} {gene}: {err}")
+                    print(f"Error: interactive page {smp} {gene} refused: {err}", file=sys.stderr)
             else:
                 notes.append(f"{smp} {gene}: igv-reports failed ({(res.stderr or res.stdout).strip().splitlines()[-1:]})")
     finally:
@@ -2587,7 +2611,24 @@ def offline_igv_page(page: str) -> str:
     (igv.org/genomes/genomes3.json) on load. Everything the page shows is embedded, so it does not need the list."""
     if re.search(r"const options\s*=\s*\{\s*loadDefaultGenomes", page):
         return page                       # already set
-    return re.sub(r"(const options\s*=\s*\{)", r"\1 loadDefaultGenomes: false,", page, count=1)
+    new, n = re.subn(r"(const options\s*=\s*\{)", r"\1 loadDefaultGenomes: false,", page, count=1)
+    if n != 1:
+        raise ValueError("the igv-reports page has no 'const options = {' block (template changed?): cannot switch "
+                         "off its genome-list request")
+    return new
+
+
+REMOTE_CODE = re.compile(r"""src\s*=\s*["']?\s*(?:https?:)?//|<link[^>]+href\s*=\s*["']?\s*(?:https?:)?//"""
+                         r"""|@import\s+(?:url\()?\s*["']?\s*(?:https?:)?//""", re.I)
+
+
+def safe_igv_page(page: str) -> str:
+    """The page made offline, or ValueError: a page that loads a script or stylesheet from the network, or that the
+    genome-list switch cannot be applied to, is never written (it would contact outside hosts with read data open)."""
+    m = REMOTE_CODE.search(page)
+    if m:
+        raise ValueError(f"the igv-reports page loads remote code ({page[m.start():m.start() + 60]!r}); not written")
+    return offline_igv_page(page)
 
 
 BUNDLE_NAME = "igv_validation_full.zip"
@@ -2836,10 +2877,10 @@ def summarize(root: Path, out: Path | None = None, regions: Path | None = None, 
         acolor = {"yes": soft, "no": red, "unclear": "#f6e3a1", "in reads, recurrent": "#dcd6ec"}
         counts = {k: sum(a["igv_agrees"] == k for a in agree) for k in acolor}
         raw_body = (
-            f"<p><b>{counts['no']} to look at first, {counts['unclear']} unclear, {counts['in reads, recurrent']} likely "
-            f"inherited or artifact, {counts['yes']} consistent so far</b> out of {len(agree)} raw calls from the callers "
-            f"(SNVs/indels, SVs, copy-number gains/losses), before any filtering. <i>Likely inherited or artifact</i>: "
-            f"the same variant is in {RECURRENT_MIN}+ samples.</p>"
+            f"<p><b>{counts['no']} to look at first, {counts['unclear']} unclear, {counts['in reads, recurrent']} "
+            f"recurrent, {counts['yes']} consistent so far</b> out of {len(agree)} raw calls from the callers "
+            f"(SNVs/indels, SVs, copy-number gains/losses), before any filtering. <i>Recurrent</i>: "
+            f"the same variant is in {RECURRENT_MIN}+ samples; {RECURRENT_NOTE}.</p>"
             + (f"<p><i>Overview images: {e(ov_note)}</i></p>" if ov_note else "")
             + "<div class=w><table><tr><th>Sample</th><th>Gene</th><th>Tool</th><th>The caller called</th>"
               "<th>What IGV shows</th><th>Start here</th><th>Evidence</th></tr>" + "".join(

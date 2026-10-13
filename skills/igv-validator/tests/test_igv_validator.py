@@ -289,6 +289,62 @@ def test_interactive_gene_track_shows_gene_name_and_transcript(tmp_path):
     assert f[9] == "2" and f[10] == "100,200" and f[11] == "0,200"             # two exons: sizes and starts
 
 
+def test_interactive_page_is_refused_if_it_loads_remote_code_or_cannot_be_made_offline():
+    """Review, PR #549: refuse a page that loads code from the network, and fail loudly when the genome-list
+    switch cannot be applied (an igv-reports template change), rather than writing a page that phones home."""
+    ok = "<script>const options = {sessionURL: s}\nigv.createBrowser(igvDiv, options)</script>"
+    assert "loadDefaultGenomes: false" in iv.safe_igv_page(ok)
+    for bad in ('<script src="https://cdn.example.org/igv.js"></script>' + ok,
+                "<script src=//cdn.example.org/igv.js></script>" + ok,
+                '<link rel=stylesheet href="https://cdn.example.org/igv.css">' + ok,
+                "<style>@import url('https://cdn.example.org/igv.css');</style>" + ok,
+                "<script>igv.createBrowser(igvDiv, opts)</script>"):          # no options block to switch off
+        with pytest.raises(ValueError):
+            iv.safe_igv_page(bad)
+
+
+def test_real_igv_reports_page_is_made_offline(tmp_path):
+    """On real igv-reports output (skipped where igv-reports is not installed): the switch applies and no
+    remote code is loaded."""
+    pytest.importorskip("igv_reports")
+    sites = tmp_path / "sites.bed"
+    sites.write_text("demo1\t2999\t3000\tV1\n")
+    page = tmp_path / "p.html"
+    r = subprocess.run([sys.executable, "-m", "igv_reports.report", str(sites), "--fasta", str(DEMO / "demo_ref.fa"),
+                        "--tracks", str(DEMO / "demo_tumor.bam"), "--flanking", "200", "--standalone",
+                        "--output", str(page)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    out = iv.safe_igv_page(page.read_text())
+    assert "loadDefaultGenomes: false" in out and not re.search(r'src\s*=\s*["\']?\s*(https?:)?//', out, re.I)
+
+
+def test_shifted_insertion_outside_a_repeat_needs_the_same_haplotype(tmp_path):
+    """Review, PR #549: with --reference, an insertion 2 bp off the call counts only if it gives the same sequence;
+    a rotation of the inserted bases outside a repeat does not."""
+    import random
+    rng = random.Random(11)
+    seq = "".join(rng.choice("ACGT") for _ in range(400))
+    ins = "GATTA"
+    rot = ins[2:] + ins[:2]                                      # a rotation, placed 2 bp to the right
+    assert seq[200:202] + rot != ins + seq[200:202]               # ... which is a different sequence here
+    fa = tmp_path / "r.fa"
+    fa.write_text(">c1\n" + seq + "\n"); pysam.faidx(str(fa))
+    header = {"HD": {"VN": "1.6"}, "SQ": [{"SN": "c1", "LN": 400}]}
+    raw = tmp_path / "u.bam"
+    with pysam.AlignmentFile(str(raw), "wb", header=header) as out:
+        for name, k, s in [("alt1", 50, ins), ("alt2", 50, ins), ("rot", 52, rot)]:
+            a = pysam.AlignedSegment(out.header)
+            a.query_name, a.flag, a.reference_id, a.reference_start = name, 0, 0, 150
+            a.cigarstring, a.mapping_quality = f"{k}M{len(s)}I{100 - k}M", 60
+            a.query_sequence = seq[150:150 + k] + s + seq[150 + k:250]
+            a.query_qualities = pysam.qualitystring_to_array("?" * len(a.query_sequence))
+            out.write(a)
+    bam = tmp_path / "o.bam"
+    pysam.sort("-o", str(bam), str(raw)); pysam.index(str(bam))
+    v = iv.Variant(id="i", chrom="c1", pos=200, ref=seq[199], alt=seq[199] + ins, kind="insertion")
+    assert iv.count_variant(v, bam, fasta=fa)["alt"] == 2
+
+
 # ── Tumor-only mode ────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module")
@@ -1196,7 +1252,7 @@ def test_recurrent_snv_is_marked_not_called_a_mutation():
     iv.mark_recurrent(rows)
     ag = iv._agreement(rows[0])
     assert ag["igv_agrees"] == "in reads, recurrent"
-    assert "5 of 5 samples" in ag["why"] and "germline or artifact" in ag["why"]
+    assert "5 of 5 samples" in ag["why"] and "inherited or artifacts" in ag["why"] and "hotspot" in ag["why"]
     assert rows[0]["concordance"] == "recurrent"
     assert iv._agreement(rows[-1])["igv_agrees"] == "yes"      # private to one sample: unchanged
 
@@ -1352,7 +1408,7 @@ def test_heatmap_wt_with_a_recurrent_variant_is_explained(tmp_path):
     hm = _heatmap(tmp_path, [("S1", "DEMO1", "WT")])
     c = iv.curated_vs_igv(rows, hm)[0]
     assert c["match"] == "matches"
-    assert "recurrent" in c["igv_found"] and "germline or artifact" in c["why"]
+    assert "recurrent" in c["igv_found"] and "hotspot" in c["why"]
 
 
 def test_heatmap_flag_writes_the_comparison(summary_dir, tmp_path):
@@ -1415,6 +1471,28 @@ def test_one_x_copy_is_not_a_deletion(tmp_path):
     rows = [_cn_row("S", "GENEC", "no segment; depth loss", None, 0, "loss", status="no_segment", chrom="chrX")]
     c = _compare(tmp_path, rows, [("S", "GENEC", "WT")])
     assert c["GENEC"]["match"] == "matches"
+
+
+def test_chrX_explanation_only_on_chrX(tmp_path):
+    """The 'single X copy' explanation belongs to chrX genes only (review, PR #549)."""
+    for chrom, says in (("chrX", True), ("chr2", False)):
+        rows = [_cn_row("S", "GENEC", "no segment; depth loss", None, 0, "loss", status="no_segment", chrom=chrom)]
+        c = _compare(tmp_path, rows, [("S", "GENEC", "WT")])["GENEC"]
+        assert ("X copy" in c["details"] + c["why"] + c["plain"]) is says, chrom
+
+
+def test_recurrent_variant_is_not_asserted_germline(tmp_path):
+    """A hotspot (KRAS G12D-like) is the same base in many tumours: a curated SNV on it stays consistent, and the
+    text names the possibilities instead of asserting germline (review, PR #549)."""
+    rows = [dict(_snv_row(s, "chr12:25245350", "chr12:25245350 C>T"), gene="GENEC", _vaf=38.0, _alt=30)
+            for s in ("A", "B", "C")]
+    iv.mark_recurrent(rows)
+    by = {x["sample"]: x for x in iv.curated_vs_igv(rows, _heatmap(tmp_path, [("A", "GENEC", "SNV"), ("B", "GENEC", "WT")]))}
+    text = " ".join(by["A"][k] for k in ("why", "details", "plain")) + " ".join(by["B"][k] for k in ("why", "details", "plain"))
+    assert by["A"]["match"] == "matches" and by["B"]["match"] == "matches"
+    assert "do not share" not in text and "hotspot" in text
+    ag = iv._agreement(rows[0])
+    assert "do not share" not in ag["why"] and "hotspot" in ag["why"]
 
 
 def test_depth_only_deep_loss_counts_as_a_deletion(tmp_path):
