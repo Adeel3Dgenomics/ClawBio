@@ -763,6 +763,11 @@ def integrity_verdict(audit: ScoreAudit | None, min_weight_coverage: float = 0.9
     return IntegrityVerdict(passed=not reasons, reasons=reasons, warnings=warnings)
 
 
+# gwas-prs writes z_score rounded to 3 decimals (half-unit 0.0005). sd = |dev / z|
+# carries that error as 0.0005 / |z|, which stays within 5% only for |z| >= 0.01.
+Z_FLOOR_FOR_SD = 0.01
+
+
 def reference_sd(score: ScoreDefinition, rec: dict[str, Any]) -> tuple[float | None, str]:
     """Derive the reference sd as |(raw - expected_mean) / z|, but only when the
     reference mean is known to be Sum(2*AF*w) over this file's af_reference.
@@ -788,6 +793,10 @@ def reference_sd(score: ScoreDefinition, rec: dict[str, Any]) -> tuple[float | N
     em = expected_mean(score)
     if raw is None or z is None or em is None or z == 0:
         return None, "reference sd underivable: missing raw score, z score or expected mean, or z = 0."
+    if abs(z) < Z_FLOOR_FOR_SD:
+        return None, (f"reference sd not derived: |z| = {abs(z):.4g} is below {Z_FLOOR_FOR_SD}. "
+                      "gwas-prs rounds z to 3 decimals, so below this floor the rounding "
+                      "error alone would move the derived sd by more than 5%.")
     why = ("curated panel" if score.curated
            else "percentile centred on the allele-frequency expectation")
     return abs((raw - em) / z), f"reference sd derived from (raw, z, expected mean): {why}."

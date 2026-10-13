@@ -2191,3 +2191,23 @@ class TestRound23ManuelReview:
         source = (self.GWAS_PRS_DATA / name).read_text()
         assert self.CAVEAT in source, name
         assert (EXAMPLES / "scores" / name).read_bytes() == (self.GWAS_PRS_DATA / name).read_bytes()
+
+
+class TestRound24ManuelReview:
+    """PR #348 automated audit of 13 Oct 2026: reference_sd guarded only z == 0."""
+
+    @pytest.mark.parametrize("z", [0.004, -0.004, 0.0005])
+    def test_near_zero_z_does_not_derive_an_inflated_sd(self, z):
+        import prs_abstain as pa
+        sd, note = pa.reference_sd(TestReferenceSdProvenance._score(curated=True),
+                                   {"raw_score": 0.9, "z_score": z,
+                                    "reference_population": "EUR"})
+        assert sd is None
+        assert "below" in note and "rounds z" in note
+
+    def test_z_at_the_floor_still_derives(self):
+        import prs_abstain as pa
+        sd, _ = pa.reference_sd(TestReferenceSdProvenance._score(curated=True),
+                                {"raw_score": 0.9, "z_score": pa.Z_FLOOR_FOR_SD,
+                                 "reference_population": "EUR"})
+        assert sd is not None and sd > 0
