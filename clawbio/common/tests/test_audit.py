@@ -444,3 +444,20 @@ def test_spans_name_the_emitting_module_as_their_scope(tmp_path, exported):
         with tool_call("fetch"):
             pass
     assert {s.instrumentation_scope.name for s in exported} == {"clawbio.common.audit"}
+
+
+
+@pytest.mark.parametrize("env, project, service", [
+    ({"OTEL_RESOURCE_ATTRIBUTES": "openinference.project.name=hermes-agent"}, "hermes-agent", "clawbio"),
+    ({"OTEL_SERVICE_NAME": "hermes"}, "clawbio", "hermes"),
+])
+def test_environment_overrides_only_what_it_sets(tmp_path, exported, monkeypatch, env, project, service):
+    # Setting one variable must leave the other field at clawbio's fallback,
+    # never "unknown_service".
+    for var, value in env.items():
+        monkeypatch.setenv(var, value)
+    with skill_run("pharmgx", "0.2.0", log_path=tmp_path / "a.jsonl"):
+        pass
+    attrs = exported[0].resource.attributes
+    assert attrs["openinference.project.name"] == project
+    assert attrs["service.name"] == service
