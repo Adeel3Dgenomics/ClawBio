@@ -5,6 +5,7 @@ import stat
 from pathlib import Path
 
 import subprocess
+import sys
 import pytest
 
 from clawbio.common import audit
@@ -175,6 +176,17 @@ def test_otlp_exporter_is_opt_in(tmp_path, monkeypatch):
     with skill_run("pharmgx", "0.2.0", log_path=tmp_path / "b.jsonl"):
         pass
     assert endpoints == ["http://localhost:4318/v1/traces"]
+
+
+def test_missing_otlp_extra_warns_and_keeps_the_analysis_running(tmp_path, monkeypatch, capsys):
+    """Without clawbio[otlp], a set endpoint must cost the traces, not the run."""
+    monkeypatch.setitem(sys.modules, "opentelemetry.exporter.otlp.proto.http.trace_exporter", None)
+    monkeypatch.setenv("CLAWBIO_OTLP_ENDPOINT", "http://localhost:4318")
+    log = tmp_path / "audit.jsonl"
+    with skill_run("pharmgx", "0.2.0", log_path=log):
+        pass
+    assert "clawbio[otlp]" in capsys.readouterr().err
+    assert log.read_text().strip(), "local audit log should still be written"
 
 
 def test_skill_run_records_provenance_attributes(tmp_path):
