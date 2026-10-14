@@ -6,6 +6,7 @@ testing, and end-to-end demo mode for both platforms.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -26,6 +27,8 @@ from affinity_proteomics import (
     parse_olink_npx,
     run_pipeline,
 )
+
+needs_statsmodels = pytest.mark.skipif(importlib.util.find_spec("statsmodels") is None, reason="needs statsmodels (uv sync --extra affinity-proteomics)")
 
 HAS_SOMADATA = True
 try:
@@ -110,6 +113,7 @@ class TestSomaLogicParser:
 # ---------------------------------------------------------------------------
 # Unit tests — differential abundance
 # ---------------------------------------------------------------------------
+@needs_statsmodels
 class TestDifferentialAbundance:
     @pytest.fixture
     def olink_data(self):
@@ -150,6 +154,7 @@ class TestDifferentialAbundance:
 # ---------------------------------------------------------------------------
 # Integration tests — Olink demo
 # ---------------------------------------------------------------------------
+@needs_statsmodels
 class TestOlinkDemo:
     def test_olink_demo_end_to_end(self, tmp_path):
         summary = run_pipeline(
