@@ -495,8 +495,6 @@ uv run pytest                                   # whole repo
 uv run pytest skills/pharmgx-reporter/tests/ -v # one skill
 ```
 
-Without `--all-extras`, tests that need a missing extra are skipped, not failed.
-
 ### Dependencies
 
 Core dependencies are declared in [`pyproject.toml`](pyproject.toml) and pinned in [`uv.lock`](uv.lock): biopython, pandas, numpy, scikit-learn, matplotlib, openai, pydeseq2, google-cloud-bigquery, google-auth, conda-lock, rocrate. Most skills run with just these.
