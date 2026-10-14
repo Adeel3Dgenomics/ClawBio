@@ -247,7 +247,7 @@ jobs:
           # skills/just-prs-mcp/tests failed to import typer and took the whole
           # job down with it on any PR that reached those tests.
           uv sync --locked --all-extras
-          uv pip install pytest requests
+          uv pip install requests
 
       - name: Test ClawBio CLI
         run: uv run python clawbio.py list
@@ -499,7 +499,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --locked
-          uv pip install pytest pyyaml
+          uv pip install pyyaml
 
       - name: Run reference genome benchmarks
         run: uv run pytest tests/benchmark/test_reference_genome.py -v
