@@ -23,6 +23,8 @@ assignees: ''
 - **Input**: <!-- e.g. VCF + phenotype file -->
 - **Output**: <!-- e.g. Manhattan plot + summary statistics + reproducibility bundle -->
 
+## Mermaid diagram
+
 ## Why it matters
 
 <!-- Who needs this? What gap does it fill? -->
