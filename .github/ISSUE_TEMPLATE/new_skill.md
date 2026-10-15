@@ -25,6 +25,8 @@ assignees: ''
 
 ## Mermaid diagram
 
+<!-- A Mermaid flowchart of inputs → steps → outputs -->
+
 ## Why it matters
 
 <!-- Who needs this? What gap does it fill? -->
