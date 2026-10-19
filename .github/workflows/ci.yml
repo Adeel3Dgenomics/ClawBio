@@ -402,6 +402,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Find skills whose harness this PR should run
         id: detect
@@ -443,11 +444,14 @@ jobs:
 
       - name: Run each harness in its own declared environment
         if: steps.detect.outputs.skills != ''
+        env:
+          # Skill names are PR directory names; an env var keeps them out of the script text.
+          SKILLS: ${{ steps.detect.outputs.skills }}
         run: |
           set -euo pipefail
           export MAMBA_ROOT_PREFIX=/tmp/mamba
           status=0
-          for skill in ${{ steps.detect.outputs.skills }}; do
+          for skill in $SKILLS; do
             env_file="skills/$skill/environment.yml"
             harness=$(find "skills/$skill/tests" -maxdepth 1 -name '*.sh' | sort | head -1)
             if [ ! -f "$env_file" ]; then
