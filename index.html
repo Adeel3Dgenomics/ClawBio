@@ -362,6 +362,20 @@ clawbio run pharmgx --demo</pre>
       <div class="section-title">Latest from the community</div>
       <div style="display:grid;gap:0.75rem;max-width:700px;">
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;display:flex;align-items:center;gap:1rem;">
+          <span style="font-size:1.5rem;flex-shrink:0;">🔍</span>
+          <div>
+            <div style="font-weight:600;font-size:0.95rem;"><strong>docs(audit): skill_run is a child span under a caller's TRACEPARENT.</strong> The skill_run docstring now says it joins the caller's trace when TRACEPARENT is set, rather than always starting a root trace, matching the behaviour added in #653. Contributed by @camlloyd.</div>
+            <div style="color:var(--text-muted);font-size:0.85rem;margin-top:0.15rem;">PR #656 · merged · 19 October 2026</div>
+          </div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;display:flex;align-items:center;gap:1rem;">
+          <span style="font-size:1.5rem;flex-shrink:0;">🛡️</span>
+          <div>
+            <div style="font-weight:600;font-size:0.95rem;"><strong>ci: fix zizmor findings in ci.yml and bench-leaderboard.yml.</strong> A skill-name template-injection risk in the CI harness step and two checkouts that kept persisted git credentials unnecessarily are fixed, closing out the zizmor findings those two workflows had open. Contributed by @camlloyd.</div>
+            <div style="color:var(--text-muted);font-size:0.85rem;margin-top:0.15rem;">PR #658 · merged · 19 October 2026</div>
+          </div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;display:flex;align-items:center;gap:1rem;">
           <span style="font-size:1.5rem;flex-shrink:0;">🧵</span>
           <div>
             <div style="font-weight:600;font-size:0.95rem;"><strong>feat(audit): nest skill_run under the caller's span from TRACEPARENT.</strong> When an agent runs a skill, the shared audit layer's skill_run span now joins the agent's own trace via the W3C TRACEPARENT header, instead of starting a disconnected root trace. Contributed by @camlloyd.</div>
@@ -415,20 +429,6 @@ clawbio run pharmgx --demo</pre>
           <div>
             <div style="font-weight:600;font-size:0.95rem;"><strong>docs(templates): ask new-skill proposers to check for similar skills first.</strong> The new-skill issue template now asks proposers to confirm no similar skill already exists, after two pairs of overlapping skills were added without either side noticing the other. Contributed by @camlloyd.</div>
             <div style="color:var(--text-muted);font-size:0.85rem;margin-top:0.15rem;">PR #643 · merged · 17 October 2026</div>
-          </div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;display:flex;align-items:center;gap:1rem;">
-          <span style="font-size:1.5rem;flex-shrink:0;">🧬</span>
-          <div>
-            <div style="font-weight:600;font-size:0.95rem;"><strong>fix(wgs-prs): stop the test conftest unloading every clawbio module.</strong> The wgs-prs test conftest was unloading and re-importing every clawbio module during collection, leaving a stale duplicate of clawbio.cli loaded in a shared test session; removing the conftest fixes the resulting test-isolation failures. Contributed by @camlloyd.</div>
-            <div style="color:var(--text-muted);font-size:0.85rem;margin-top:0.15rem;">PR #641 · merged · 17 October 2026</div>
-          </div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;display:flex;align-items:center;gap:1rem;">
-          <span style="font-size:1.5rem;flex-shrink:0;">📚</span>
-          <div>
-            <div style="font-weight:600;font-size:0.95rem;"><strong>fix(lit-synthesizer): replace the invented demo papers with real PubMed and bioRxiv records.</strong> The lit-synthesizer demo showed three invented papers with fabricated PMIDs and DOIs; it now shows four real PubMed and bioRxiv records parsed by the skill's own parsers, checked against the saved source data by a provenance test. Contributed by @manuelcorpas.</div>
-            <div style="color:var(--text-muted);font-size:0.85rem;margin-top:0.15rem;">PR #645 · merged · 16 October 2026</div>
           </div>
         </div>
       </div>
