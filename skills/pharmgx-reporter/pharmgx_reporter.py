@@ -847,7 +847,9 @@ _DPYD_D949V_HOM_NOTE = ("Patients with the c.2846A>T/c.2846A>T genotype may requ
 
 def _dpyd_note(gene, profile):
     """CPIC caveat for c.2846A>T homozygotes, who are AS 1.0 like *2A carriers."""
-    if gene != "DPYD" or profile.get("phenotype") != "Intermediate Metabolizer":
+    # Match on the key, not the label: a partly genotyped D949V/D949V reads
+    # "Intermediate Metabolizer (HapB3 not tested)" (#603) and must keep the caveat.
+    if gene != "DPYD" or phenotype_to_key(profile.get("phenotype", "")) != "intermediate_metabolizer":
         return None
     if profile.get("diplotype", "").split("(")[0].strip() == "D949V/D949V":
         return _DPYD_D949V_HOM_NOTE

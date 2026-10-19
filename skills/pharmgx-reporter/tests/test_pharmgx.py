@@ -1045,3 +1045,20 @@ def test_dpyd_d949v_caveat_reaches_dosage_card():
     profiles = _dpyd_profiles({**_DPYD_REF, "rs67376798": "AA"})
     card = format_dosage_card(lookup_single_drug("Capecitabine", profiles))
     assert ">50% reduction in starting dose" in " ".join(card.split())
+
+
+@pytest.mark.parametrize("phenotype", [
+    "Intermediate Metabolizer",
+    "Intermediate Metabolizer (HapB3 not tested)",
+])
+def test_dpyd_d949v_caveat_survives_phenotype_qualifier(phenotype):
+    """#603: a partly genotyped D949V/D949V can carry a qualifier on the phenotype."""
+    from pharmgx_reporter import _dpyd_note, _DPYD_D949V_HOM_NOTE
+    profile = {"phenotype": phenotype, "diplotype": "D949V/D949V"}
+    assert _dpyd_note("DPYD", profile) == _DPYD_D949V_HOM_NOTE
+
+
+def test_dpyd_d949v_caveat_not_for_other_phenotypes():
+    from pharmgx_reporter import _dpyd_note
+    for phenotype in ("Poor Metabolizer", "Normal Metabolizer", "Indeterminate"):
+        assert _dpyd_note("DPYD", {"phenotype": phenotype, "diplotype": "D949V/D949V"}) is None
