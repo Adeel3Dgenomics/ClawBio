@@ -125,7 +125,8 @@ def skill_run(
     output_dir: str = "",
     log_path: Path | str | None = None,
 ):
-    """Root trace for a skill invocation. Yields the span_id (16-char hex).
+    """Span for a skill invocation: a root, or a child of the caller's span
+    from TRACEPARENT. Yields the span_id (16-char hex).
 
     PII warning: ``input_file``, ``output_dir``, and any future kwargs are written
     to ``~/.clawbio/audit.jsonl``, and, when ``CLAWBIO_OTLP_ENDPOINT`` is set, are
