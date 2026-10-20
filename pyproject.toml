@@ -123,7 +123,7 @@ robotary = [
 
 # PDF rendering in prs-abstain; the skill degrades to markdown-only without them.
 prs-abstain = [
-    "reportlab>=4.0,<5",
+    "reportlab>=5.0.1,<6",
     "pillow>=10,<13",
 ]
 
