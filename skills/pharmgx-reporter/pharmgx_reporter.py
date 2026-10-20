@@ -935,6 +935,9 @@ def format_dosage_card(result, visible_dose=None):
             rec_text = f"{visible_dose} may need adjustment."
         elif cl == "avoid":
             rec_text = f"Your genotype contraindicates {result['drug']} {visible_dose}."
+        # Keep guideline caveats (DPYD c.2846A>T, warfarin) beside the dose line.
+        if result.get("note") and cl in ("standard", "caution", "avoid"):
+            rec_text = f"{rec_text} {result['note']}"
 
     # Wrap recommendation text at ~42 chars
     words = rec_text.split()
