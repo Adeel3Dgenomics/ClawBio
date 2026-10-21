@@ -27,7 +27,7 @@ metadata:
       type: file
       format:
         - bed
-      description: Candidate target gene coordinates with gene symbol
+      description: Candidate target gene coordinates with gene symbol and strand (chrom, start, end, gene_symbol, strand)
       required: true
     - name: accessibility_track
       type: file
@@ -73,7 +73,7 @@ metadata:
     - path: demo_h3k27ac.bed
       description: Synthetic H3K27ac peaks
     - path: demo_loops.bedpe
-      description: Synthetic loop anchors, including one that contacts a different gene than the nearest-TSS call
+      description: Synthetic loop anchors, including one that contacts a different gene than the nearest gene call
     - path: demo_targets.bed
       description: 4 synthetic candidate target genes
   endpoints:
@@ -128,7 +128,7 @@ You are **Multiomics Locus Integrator**, a specialised ClawBio agent for regulat
 
 1. **Layer overlap scoring**: weighted integration of accessibility, histone, and contact evidence, using only the layers actually supplied.
 2. **Not-assayed vs. absent distinction**: a layer that never covered a locus's region is reported as `not_assayed`, never silently conflated with a true negative.
-3. **Dual target-gene assignment**: nearest-TSS by proximity, and loop-contacted gene if contact evidence is present, with disagreements between the two explicitly flagged rather than silently resolved.
+3. **Dual target-gene assignment**: nearest gene by proximity, and loop-contacted gene if contact evidence is present, with disagreements between the two explicitly flagged rather than silently resolved.
 
 ## Scope
 
@@ -139,14 +139,14 @@ You are **Multiomics Locus Integrator**, a specialised ClawBio agent for regulat
 | Format | Extension | Required Fields | Example |
 |--------|-----------|-----------------|---------|
 | Loci BED | `.bed` | chrom, start, end, id | `demo_loci.bed` |
-| Gene targets BED | `.bed` | chrom, start, end, gene_symbol | `demo_targets.bed` |
+| Gene targets BED | `.bed` | chrom, start, end, gene_symbol, strand (+/-) | `demo_targets.bed` |
 | Accessibility/histone BED | `.bed` | chrom, start, end, peak_id | `demo_atac.bed` |
 | Contact BEDPE | `.bedpe` | chrom1, start1, end1, chrom2, start2, end2, loop_id | `demo_loops.bedpe` |
 
 ## Workflow
 
 1. **Validate**: require `--loci` and `--gene-targets`; require at least one evidence layer (accessibility, histone, or contact).
-2. **Process**: for each locus, determine per-layer `checked` / `supported` / `not_assayed` status (a layer is `not_assayed` for a locus outside that layer's observed chromosomal span), compute the weighted score, assign a tier, and resolve nearest-TSS and loop-contact target genes.
+2. **Process**: for each locus, determine per-layer `checked` / `supported` / `not_assayed` status (a layer is `not_assayed` for a locus outside that layer's observed chromosomal span), compute the weighted score, assign a tier, and resolve nearest-gene and loop-contact target genes.
 3. **Generate**: write `tables/evidence_table.tsv` (one row per locus) and `result.json` (full structured result).
 4. **Report**: write `report.md` with the summary table and the reproducibility bundle.
 
@@ -179,7 +179,7 @@ All demo coordinates are synthetic (fictitious `chr5` positions, invented gene s
 2. A layer is `not_assayed` for a locus if the locus falls outside that layer's observed min/max span on that chromosome (the layer file never covered this region) — reported separately from `unsupported` (checked, no overlap found).
 3. Score = (sum of weights of *supported* layers) / (sum of weights of *checked* layers) — only layers actually supplied and spanning the locus count toward the denominator, so a locus is never penalised for a layer nobody ran.
 4. Tier: `high` (score ≥ 0.75 **and** ≥ 2 distinct supported layer types — a single heavily-weighted layer alone cannot reach `high`), `partial` (any support), `unsupported` (checked, zero support), `not_assayed` (no layer covered this locus at all).
-5. Target gene: nearest-TSS by proximity (distance from locus midpoint to gene body), **and separately** any gene contacted via a loop whose other anchor overlaps the locus. If they disagree, both are reported — contact evidence does not silently override proximity.
+5. Target gene: nearest gene by proximity to a strand-aware TSS window (`TSS-1000bp` to `TSS+250bp` — standard promoter-proximal convention; `+`-strand TSS = BED start, `-`-strand TSS = BED end), **and separately** any gene contacted via a loop whose other anchor overlaps the locus. If they disagree, both are reported — contact evidence does not silently override proximity.
 
 **Key thresholds**:
 - Layer weights: accessibility 1.0, histone 1.0, contact 2.0 (contact evidence weighted higher — harder to obtain spuriously than a single peak call). Not currently user-overridable; a `--weights` flag is a natural v0.2 addition.
@@ -224,6 +224,7 @@ output_directory/
 
 ## Gotchas
 
+- **A gene with no strand is a BED record with no usable TSS.** The upstream/downstream sense of "1kb upstream, 250bp downstream" only means something once strand picks which end of the interval is the start — `gene-targets` therefore requires a 5th strand column (`+`/`-`); earlier revisions silently measured distance to whichever gene-body edge was nearer, which is the wrong edge for every minus-strand gene (PR #678 review).
 - **A `not_assayed` locus is not evidence of absence.** If a track was never generated over a region, every locus in it will otherwise read identically to a true negative unless this distinction is computed explicitly — this skill derives `not_assayed` from each layer's own observed chromosomal span, not from a hardcoded genome-wide assumption.
 - **Enumerate every evidence file's actual coverage before trusting a `tier`.** A loop/TAD file can cover only part of a chromosome; the per-chromosome span check is what catches this, but it is only as good as the supplied file — a track with one stray far-off interval will inflate its apparent span and hide a real `not_assayed` region.
 - **Nearest-gene and contact-gene disagreement must be surfaced, not silently resolved.** Early drafts defaulted to "contact wins" — this is wrong: both are real candidate answers with different evidence bases, and collapsing them hides exactly the kind of judgment call a reviewer needs to see (demonstrated by `L4_disagree` in the demo data).

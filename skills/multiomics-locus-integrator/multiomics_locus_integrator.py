@@ -28,6 +28,12 @@ LAYER_WEIGHTS = {"accessibility": 1.0, "histone": 1.0, "contact": 2.0}
 HIGH_SCORE_THRESHOLD = 0.75
 HIGH_MIN_DISTINCT_LAYERS = 2
 
+# Promoter-proximal TSS window (standard convention, e.g. HOMER/ChIPseeker
+# defaults in this range): upstream is more generous than downstream because
+# most regulatory elements cluster just upstream of the TSS.
+TSS_UPSTREAM_BP = 1000
+TSS_DOWNSTREAM_BP = 250
+
 Interval = tuple[str, int, int, str]
 LoopAnchor = tuple[str, int, int, str, int, int, str]
 
@@ -46,6 +52,43 @@ def parse_bed(path: Path) -> list[Interval]:
             name = fields[3] if len(fields) > 3 else f"{chrom}:{start}-{end}"
             intervals.append((chrom, start, end, name))
     return intervals
+
+
+def parse_gene_targets(path: Path) -> list[Interval]:
+    """Parse gene-targets BED (chrom, start, end, gene_symbol, strand) into
+    strand-aware TSS windows: [TSS-1000bp, TSS+250bp).
+
+    The window, not the full gene body, IS the gene's region from here on —
+    nearest_gene() and contact_genes() just see it as an ordinary Interval and
+    need no changes. This replaced an earlier "nearest-TSS" label that was
+    actually measuring distance to the nearer edge of the whole gene body
+    (wrong for any minus-strand gene, since BED carries no strand of its own
+    without this column).
+    """
+    genes: list[Interval] = []
+    with path.open(encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line or line.startswith(("#", "track", "browser")):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 5:
+                raise ValueError(
+                    f"{path}:{line_no}: gene-targets BED needs >=5 tab-separated "
+                    f"fields (chrom, start, end, gene_symbol, strand)"
+                )
+            chrom, start, end = fields[0], int(fields[1]), int(fields[2])
+            name, strand = fields[3], fields[4]
+            if strand == "+":
+                tss = start
+                win_start, win_end = tss - TSS_UPSTREAM_BP, tss + TSS_DOWNSTREAM_BP
+            elif strand == "-":
+                tss = end
+                win_start, win_end = tss - TSS_DOWNSTREAM_BP, tss + TSS_UPSTREAM_BP
+            else:
+                raise ValueError(f"{path}:{line_no}: strand must be '+' or '-', got {strand!r}")
+            genes.append((chrom, max(win_start, 0), win_end, name))
+    return genes
 
 
 def parse_bedpe(path: Path) -> list[LoopAnchor]:
@@ -112,6 +155,22 @@ def nearest_gene(chrom: str, start: int, end: int, genes: list[Interval]) -> tup
     return best_name, best_dist
 
 
+def locus_in_any_loop(chrom: str, start: int, end: int, loops: list[LoopAnchor]) -> bool:
+    """Pure interval overlap: does this locus sit in ANY loop anchor at all?
+
+    Deliberately independent of whether a gene is known at the other anchor —
+    "is there contact evidence here" and "do we know the gene it reaches" are
+    two separate questions (see contact_genes below). Conflating them let a
+    sparse --gene-targets list silently hide real loop evidence (PR #678).
+    """
+    for chrom1, start1, end1, chrom2, start2, end2, _name in loops:
+        if _overlaps(chrom, start, end, chrom1, start1, end1) or _overlaps(
+            chrom, start, end, chrom2, start2, end2
+        ):
+            return True
+    return False
+
+
 def contact_genes(
     chrom: str, start: int, end: int, loops: list[LoopAnchor], genes: list[Interval]
 ) -> list[tuple[str, str]]:
@@ -158,8 +217,7 @@ def score_locus(
     if loops:
         if within_span(chrom, start, end, loop_span):
             checked.append("contact")
-            contacts = contact_genes(chrom, start, end, loops, genes)
-            if contacts:
+            if locus_in_any_loop(chrom, start, end, loops):
                 supported.append("contact")
         else:
             not_assayed.append("contact")
@@ -332,8 +390,9 @@ def write_outputs(
         "|---|---|---:|---|---|---|---|---|---|---|",
     ]
     for r in result["loci"]:
+        score_cell = "" if r["score"] is None else r["score"]
         rows.append(
-            f"| {r['locus_id']} | {r['chrom']}:{r['start']}-{r['end']} | {r['score']} | {r['tier']} | "
+            f"| {r['locus_id']} | {r['chrom']}:{r['start']}-{r['end']} | {score_cell} | {r['tier']} | "
             f"{','.join(r['layers_checked']) or '-'} | {','.join(r['layers_supported']) or '-'} | "
             f"{','.join(r['layers_not_assayed']) or '-'} | {r['target_gene_nearest'] or '-'} | "
             f"{r['target_gene_contact'] or '-'} | {'YES' if r['nearest_vs_contact_disagreement'] else ''} |"
@@ -384,7 +443,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         loci = parse_bed(loci_path)
-        genes = parse_bed(gene_path)
+        genes = parse_gene_targets(gene_path)
         accessibility = parse_bed(accessibility_path) if accessibility_path else []
         histone = parse_bed(histone_path) if histone_path else []
         loops = parse_bedpe(contact_path) if contact_path else []

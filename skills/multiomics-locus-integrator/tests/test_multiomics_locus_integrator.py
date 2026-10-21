@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import multiomics_locus_integrator as mli  # noqa: E402
@@ -62,6 +64,59 @@ def test_contact_gene_disagreement_is_flagged_not_resolved() -> None:
     assert row["target_gene_nearest"] == "GENE_NEAR"
     assert row["target_gene_contact"] == "GENE_FAR"
     assert row["nearest_vs_contact_disagreement"] is True
+
+
+def test_contact_support_is_independent_of_a_known_gene_at_the_far_anchor() -> None:
+    # PR #678 review (manuelcorpas): a locus genuinely sitting inside a real
+    # loop anchor must count as contact-supported even when --gene-targets is
+    # too sparse to name the gene at the loop's far end. "Is there a loop
+    # here?" and "do we know the gene?" are two separate questions; a thin
+    # gene list must never hide real chromatin-contact evidence.
+    loci = [("chr1", 100, 110, "L1")]
+    genes: list[tuple[str, int, int, str]] = []  # sparse: nothing here at all
+    loops = [("chr1", 90, 120, "chr1", 1000, 1050, "LOOP_1")]
+    result = mli.analyze(loci, [], [], loops, genes)
+    row = result["loci"][0]
+    assert "contact" in row["layers_supported"]
+    assert row["tier"] != "unsupported"
+    assert row["target_gene_contact"] is None  # gene genuinely unknown, reported separately
+
+
+def test_gene_targets_tss_window_plus_strand(tmp_path: Path) -> None:
+    # '+' strand TSS = BED start; window = [TSS-1000, TSS+250).
+    bed = tmp_path / "genes.bed"
+    bed.write_text("chr1\t5000\t8000\tGENE_PLUS\t+\n")
+    genes = mli.parse_gene_targets(bed)
+    assert genes == [("chr1", 4000, 5250, "GENE_PLUS")]
+
+
+def test_gene_targets_tss_window_minus_strand(tmp_path: Path) -> None:
+    # '-' strand TSS = BED end; window = [TSS-250, TSS+1000).
+    bed = tmp_path / "genes.bed"
+    bed.write_text("chr1\t5000\t8000\tGENE_MINUS\t-\n")
+    genes = mli.parse_gene_targets(bed)
+    assert genes == [("chr1", 7750, 9000, "GENE_MINUS")]
+
+
+def test_gene_targets_requires_strand(tmp_path: Path) -> None:
+    bed = tmp_path / "genes.bed"
+    bed.write_text("chr1\t5000\t8000\tGENE_NOSTRAND\n")  # only 4 fields, no strand
+    with pytest.raises(ValueError, match="strand"):
+        mli.parse_gene_targets(bed)
+
+
+def test_gene_targets_rejects_invalid_strand(tmp_path: Path) -> None:
+    bed = tmp_path / "genes.bed"
+    bed.write_text("chr1\t5000\t8000\tGENE_BAD\t.\n")
+    with pytest.raises(ValueError, match="strand"):
+        mli.parse_gene_targets(bed)
+
+
+def test_gene_targets_window_never_goes_negative(tmp_path: Path) -> None:
+    bed = tmp_path / "genes.bed"
+    bed.write_text("chr1\t500\t2000\tGENE_NEAR_START\t+\n")  # TSS=500, 500-1000 would be negative
+    genes = mli.parse_gene_targets(bed)
+    assert genes[0][1] == 0  # clamped, not negative
 
 
 def test_high_tier_requires_two_distinct_supported_layers() -> None:
